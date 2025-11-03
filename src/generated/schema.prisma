@@ -1,0 +1,316 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  fullName String
+  email    String @unique
+  company  String
+  job      String
+  country  String
+  password String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // relasi untuk mereset password
+  passwordResets PasswordReset[]
+
+  // relasi untuk organization
+  organizationsOwned  Organization[]       @relation("organization_owner")
+  organizationMembers OrganizationMember[]
+
+  // relasi untuk project
+  projectsCreated      Project[]             @relation("project_creator")
+  projectCollaborators ProjectCollaborator[]
+
+  // relasi untuk fitur plan and billing
+  subscriptions    Subscription[]
+  billingAddresses BillingAddress?
+  paymentMethods   PaymentMethod[]
+
+  @@map("user")
+}
+
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_resets")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  ownerId   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // relasi
+  owner         User                 @relation("organization_owner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members       OrganizationMember[]
+  projects      Project[]
+  subscriptions Subscription[]
+
+  @@index([ownerId])
+  @@map("organization")
+}
+
+model OrganizationMember {
+  id             String    @id @default(uuid())
+  userId         Int
+  organizationId String
+  role           Role
+  status         Status    @default(PENDING)
+  joinedAt       DateTime? @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // relasi
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("organization_member")
+}
+
+model Project {
+  id             String        @id @default(uuid())
+  name           String
+  description    String?
+  organizationId String
+  createdBy      Int
+  deadline       DateTime?
+  status         ProjectStatus @default(ACTIVE)
+  customDomain   String?       @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // relasi
+  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creator       User                  @relation("project_creator", fields: [createdBy], references: [id], onDelete: Cascade)
+  collaborators ProjectCollaborator[]
+
+  @@index([organizationId])
+  @@index([createdBy])
+  @@map("project")
+}
+
+model ProjectCollaborator {
+  id        String      @id @default(uuid())
+  projectId String
+  userId    Int
+  role      ProjectRole
+  status    Status      @default(PENDING)
+  addedAt   DateTime    @default(now())
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // relasi
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@map("project_collaborator")
+}
+
+enum Role {
+  OWNER
+  COLLABORATOR
+}
+
+enum ProjectRole {
+  OWNER
+  EDITOR
+  VIEWER
+  SEO_MANAGER
+  COLLABORATOR
+}
+
+enum Status {
+  PENDING
+  ACTIVE
+  INACTIVE
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+model Plan {
+  id           String       @id @default(cuid())
+  name         String
+  description  String?
+  price        Decimal
+  billingCycle BillingCycle // Monlthly, Yearly
+  features     Json // array fitur plan
+  limits       Json // limits untuk usage
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id             String             @id @default(cuid())
+  userId         Int?
+  organizationId String?
+  planId         String
+  status         SubscriptionStatus // ACTIVE, CANCELLED, EXPIRED, TRIAL
+  startDate      DateTime
+  endDate        DateTime?
+  autoRenew      Boolean            @default(true)
+
+  // Payment info
+  lastPaymentDate DateTime?
+  nextPaymentDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan         Plan          @relation(fields: [planId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  billingHistory BillingHistory[]
+  usageTracking  UsageTracking[]
+}
+
+model BillingHistory {
+  id             String        @id @default(cuid())
+  subscriptionId String
+  planName       String
+  amount         Decimal
+  status         PaymentStatus // PAID, PENDING, FAILED, REFUNDED
+  paidAt         DateTime?
+  invoiceUrl     String?
+  paymentMethod  String? // CREDIT_CARD, EWALLET, VIRTUAL_ACCOUNT, etc
+
+  createdAt DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+}
+
+model BillingAddress {
+  id       String  @id @default(cuid())
+  userId   Int     @unique
+  fullName String
+  email    String
+  country  String
+  city     String
+  zipCode  String?
+  state    String
+  address  String
+  company  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model PaymentMethod {
+  id     String      @id @default(cuid())
+  userId Int
+  type   PaymentType // CREDIT_CARD, EWALLET, VIRTUAL_ACCOUNT
+
+  // Untuk credit card
+  cardLastFour String?
+  cardBrand    String? // Visa, Mastercard
+
+  // Untuk e-wallet
+  walletProvider String? // DANA, OVO, GOPAY
+  walletPhone    String?
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model UsageTracking {
+  id             String @id @default(cuid())
+  subscriptionId String
+
+  // Usage metrics
+  bandwidthUsed     Int @default(0) // in GB
+  apiCallsUsed      Int @default(0)
+  mediaAssetsUsed   Int @default(0)
+  projectsUsed      Int @default(0)
+  rolesUsed         Int @default(0)
+  collaboratorsUsed Int @default(0)
+  webhooksUsed      Int @default(0)
+  modelsUsed        Int @default(0)
+  localesUsed       Int @default(0)
+  recordsUsed       Int @default(0)
+
+  // Reset tracking
+  periodStart DateTime
+  periodEnd   DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  TRIAL
+  PENDING
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+enum PaymentType {
+  CREDIT_CARD
+  EWALLET
+  VIRTUAL_ACCOUNT
+  RETAIL
+  PAYLATER
+  QRIS
+}
+
+model Item {
+  id   Int    @id @default(autoincrement())
+  name String
+
+  @@map("item")
+}
